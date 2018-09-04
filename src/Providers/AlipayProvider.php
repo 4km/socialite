@@ -37,10 +37,7 @@ class AlipayProvider extends AbstractProvider implements  ProviderInterface
         $params['version'] = '1.0';
         $params['grant_type'] = 'authorization_code';
         $params['code'] = $code;
-        $params = ArrayUtil::arraySort($params);
-        $str = ArrayUtil::createLinkstring($params);
-        $rsa = new Rsa2Encrypt(StrUtil::getRsaKeyValue($this->clientSecret, 'private'));
-        $params['sign'] = $rsa->encrypt($str);
+        $params['sign'] = $this->sign($params);
 
         return $params;
     }
@@ -75,10 +72,7 @@ class AlipayProvider extends AbstractProvider implements  ProviderInterface
         $params['version'] = '1.0';
         $params['auth_token'] = $token->getToken();
 
-        $params = ArrayUtil::arraySort($params);
-        $str = ArrayUtil::createLinkstring($params);
-        $rsa = new Rsa2Encrypt(StrUtil::getRsaKeyValue($this->clientSecret, 'private'));
-        $params['sign'] = $rsa->encrypt($str);
+        $params['sign'] = $this->sign($params);
 
         $response = $this->getHttpClient()->get($this->baseUrl, [
             'query' => array_filter($params),
@@ -107,4 +101,49 @@ class AlipayProvider extends AbstractProvider implements  ProviderInterface
         ]);
     }
 
+
+    protected function sign($params)
+    {
+        ksort($params);
+        $str = http_build_query($params);
+        $key = $this->getRsaKeyValue($this->clientSecret, 'private');
+        return $this->encrypt($key, $str);
+    }
+
+
+    protected function getRsaKeyValue($keyStr, $type = 'private')
+    {
+        if (empty($keyStr)) {
+            return null;
+        }
+
+        $keyStr = str_replace(PHP_EOL, '', $keyStr);
+        // 为了解决用户传入的密钥格式，这里进行统一处理
+        if ($type === 'private') {
+            $beginStr = '-----BEGIN RSA PRIVATE KEY-----';
+            $endStr = '-----END RSA PRIVATE KEY-----';
+        } else {
+            $beginStr = '-----BEGIN PUBLIC KEY-----';
+            $endStr = '-----END PUBLIC KEY-----';
+        }
+        $keyStr = str_replace($beginStr, '', $keyStr);
+        $keyStr = str_replace($endStr, '', $keyStr);
+
+        $rsaKey = chunk_split($keyStr, 64, PHP_EOL);
+        $rsaKey = $beginStr . PHP_EOL . $rsaKey . $endStr;
+        return $rsaKey;
+    }
+
+    protected function encrypt($key, $data)
+    {
+        $res = openssl_get_privatekey($key);
+        if (empty($res)) {
+            return false;
+        }
+        openssl_sign($data, $sign, $res, OPENSSL_ALGO_SHA256);
+        openssl_free_key($res);
+        //base64编码
+        $sign = base64_encode($sign);
+        return $sign;
+    }
 }
